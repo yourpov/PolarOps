@@ -1,0 +1,49 @@
+{
+  "name": "PolarOps",
+  "version": "1.0.0",
+  "description": "Polar Operations - VPS and terminal management",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "ssh",
+    "terminal",
+    "vps",
+    "server-management"
+  ],
+  "author": "pov (YourPOV)",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ssh2": "^1.15.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "xterm-addon-search": "^0.13.0",
+    "xterm-addon-web-links": "^0.9.0"
+  },
+  "build": {
+    "appId": "com.polar.ops",
+    "productName": "PolarOps",
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/img/polar bear [256x256].png",
+      "signAndEditExecutable": false
+    }
+  }
+}
