@@ -415,9 +415,39 @@ body {
   padding: 12px;
 }
 
+/* Ultra-smooth text rendering */
+.terminal .xterm-rows {
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  font-feature-settings: "liga" 0;
+}
+
+/* Smooth cursor with fluid movement */
+.terminal .xterm-cursor-layer {
+  will-change: transform, opacity;
+  transition: transform 16ms linear;
+}
+
+.terminal .xterm-cursor {
+  transition: opacity 60ms ease-in-out, transform 16ms linear;
+}
+
+/* Subtle text shadow for depth */
+.terminal .xterm-rows > div {
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+/* Canvas rendering - crisp characters */
+.terminal canvas {
+  image-rendering: pixelated;
+  image-rendering: -webkit-optimize-contrast;
+}
+
 .terminal .xterm-selection div {
-  opacity: 0.35 !important;
+  opacity: 0.3 !important;
   border-radius: 2px;
+  transition: opacity 80ms ease;
 }
 
 .terminal .xterm-selection-layer {
@@ -454,30 +484,87 @@ body {
 
 .terminal .xterm-cursor-layer .xterm-cursor {
   position: relative;
+  will-change: opacity;
 }
 
+/* Sleek bar cursor - subtle glow */
+.terminal .xterm-cursor-layer .xterm-cursor-bar {
+  box-shadow: 0 0 6px 1px currentColor;
+}
+
+/* Block cursor styles with glow */
 [data-theme="polar-dark"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(0, 217, 255, 0.5);
+}
+
+[data-theme="polar-dark"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #00d9ff !important;
+  box-shadow: 0 0 8px rgba(0, 217, 255, 0.6);
 }
 
 [data-theme="ocean"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(100, 255, 218, 0.5);
 }
 
+[data-theme="ocean"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #64ffda !important;
+  box-shadow: 0 0 8px rgba(100, 255, 218, 0.6);
+}
+
 [data-theme="midnight"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(183, 148, 244, 0.5);
+}
+
+[data-theme="midnight"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #b794f4 !important;
+  box-shadow: 0 0 8px rgba(183, 148, 244, 0.6);
 }
 
 [data-theme="rose"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(244, 114, 182, 0.5);
 }
 
+[data-theme="rose"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #f472b6 !important;
+  box-shadow: 0 0 8px rgba(244, 114, 182, 0.6);
+}
+
 [data-theme="monokai"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(102, 217, 239, 0.5);
 }
 
+[data-theme="monokai"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #66d9ef !important;
+  box-shadow: 0 0 8px rgba(102, 217, 239, 0.6);
+}
+
 [data-theme="dracula"] .terminal .xterm-cursor-layer .xterm-cursor-block {
   box-shadow: 0 0 8px rgba(189, 147, 249, 0.5);
+}
+
+[data-theme="dracula"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #bd93f9 !important;
+  box-shadow: 0 0 8px rgba(189, 147, 249, 0.6);
+}
+
+[data-theme="arctic"] .terminal .xterm-cursor-layer .xterm-cursor-bar {
+  background: #0891b2 !important;
+  box-shadow: 0 0 10px rgba(8, 145, 178, 0.8), 0 0 20px rgba(8, 145, 178, 0.4);
+}
+
+/* Underline cursor glow */
+.terminal .xterm-cursor-layer .xterm-cursor-underline {
+  box-shadow: 0 2px 8px currentColor;
+}
+
+/* Inactive cursor style */
+.terminal .xterm-cursor-layer .xterm-cursor-outline {
+  opacity: 0.6;
+}
+
+.terminal-wrapper {
+  position: relative;
+  transition: box-shadow 200ms ease;
 }
 
 .terminal-wrapper:focus-within {
@@ -494,6 +581,12 @@ body {
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
   opacity: 0.6;
   z-index: 10;
+  animation: focusGlow 2s ease-in-out infinite;
+}
+
+@keyframes focusGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
 }
 
 .empty-sessions {
@@ -880,5 +973,25 @@ body {
   border-radius: 50%;
   margin-right: 6px;
   flex-shrink: 0;
+}
+
+.server-context-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+}
+
+.server-context-menu button:focus {
+  outline: none;
+}
+
+.server-context-menu .session-list-item {
+  transition: all 100ms ease;
+}
+
+.server-context-menu .session-list-item:hover {
+  background: var(--surface-hover);
 }
 

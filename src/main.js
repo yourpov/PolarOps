@@ -27,7 +27,8 @@ function createSplashWindow() {
     backgroundColor: '#00000000',
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      devTools: false
     }
   });
 
@@ -57,7 +58,27 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: false,
       nodeIntegration: true,
-      sandbox: false
+      sandbox: false,
+      devTools: false
+    }
+  });
+
+  // Remove application menu to prevent menu-based DevTools access
+  mainWindow.setMenu(null);
+
+  // Block DevTools keyboard shortcuts
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Block Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C (DevTools shortcuts)
+    if (input.control && input.shift && (input.key === 'I' || input.key === 'i' || input.key === 'J' || input.key === 'j' || input.key === 'C' || input.key === 'c')) {
+      event.preventDefault();
+    }
+    // Block F12 (DevTools)
+    if (input.key === 'F12') {
+      event.preventDefault();
+    }
+    // Block Ctrl+Shift+U (View Source)
+    if (input.control && input.shift && (input.key === 'U' || input.key === 'u')) {
+      event.preventDefault();
     }
   });
 
@@ -70,13 +91,29 @@ function createMainWindow() {
   
   mainWindow.on('closed', () => {
     terminals.forEach(term => term.kill());
-    sshSessions.forEach(conn => conn.end());
+    sshSessions.forEach(conn => {
+      if (conn && typeof conn.end === 'function') {
+        conn.end();
+      }
+    });
     mainWindow = null;
   });
 }
 
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-gpu-program-cache');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
+// Block --show-devtools and other DevTools-related command line arguments
+const blockedArgs = ['--show-devtools', '--devtools', '--remote-debugging-port'];
+const hasBlockedArg = process.argv.some(arg => 
+  blockedArgs.some(blocked => arg.toLowerCase().startsWith(blocked.toLowerCase()))
+);
+if (hasBlockedArg) {
+  app.quit();
+}
 
 app.whenReady().then(() => {
   db.init();
@@ -116,10 +153,36 @@ ipcMain.handle('shell:openExternal', async (event, url) => {
   return shell.openExternal(url);
 });
 
-ipcMain.handle('terminal:create', (event, sessionId) => {
-  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+ipcMain.handle('terminal:create', async (event, sessionId) => {
+  // Get shell preference from settings
+  const shellSetting = db.getSetting('shell') || 'powershell';
   
-  const term = pty.spawn(shell, [], {
+  let shellPath;
+  if (process.platform === 'win32') {
+    switch (shellSetting) {
+      case 'cmd':
+        shellPath = 'cmd.exe';
+        break;
+      case 'wsl':
+        shellPath = 'wsl.exe';
+        break;
+      case 'powershell':
+      default:
+        shellPath = 'powershell.exe';
+        break;
+    }
+  } else {
+    shellPath = process.env.SHELL || 'bash';
+  }
+  
+  // Kill any existing terminal with the same ID (shouldn't happen, but safety check)
+  if (terminals.has(sessionId)) {
+    const existingTerm = terminals.get(sessionId);
+    existingTerm.kill();
+    terminals.delete(sessionId);
+  }
+  
+  const term = pty.spawn(shellPath, [], {
     name: 'xterm-256color',
     cols: 80,
     rows: 24,
@@ -130,25 +193,29 @@ ipcMain.handle('terminal:create', (event, sessionId) => {
   terminals.set(sessionId, term);
 
   term.onData(data => {
-    mainWindow?.webContents.send('terminal:data', sessionId, data);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:data', sessionId, data);
+    }
   });
 
   term.onExit(() => {
     terminals.delete(sessionId);
-    mainWindow?.webContents.send('terminal:exit', sessionId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal:exit', sessionId);
+    }
   });
 
   return sessionId;
 });
 
-ipcMain.handle('terminal:write', (event, sessionId, data) => {
+ipcMain.on('terminal:write', (event, sessionId, data) => {
   const term = terminals.get(sessionId);
   if (term) {
     term.write(data);
   }
 });
 
-ipcMain.handle('terminal:resize', (event, sessionId, cols, rows) => {
+ipcMain.on('terminal:resize', (event, sessionId, cols, rows) => {
   const term = terminals.get(sessionId);
   if (term) {
     term.resize(cols, rows);
@@ -168,16 +235,32 @@ ipcMain.handle('ssh:connect', async (event, sessionId, config) => {
     const conn = new Client();
     
     conn.on('ready', () => {
-      conn.shell({ term: 'xterm-256color' }, (err, stream) => {
+      conn.shell({ 
+        term: 'xterm-256color',
+        modes: {
+          ECHO: 1,
+          ICANON: 0,
+          ISIG: 1,
+          IEXTEN: 0
+        }
+      }, (err, stream) => {
         if (err) {
           reject(err);
           return;
         }
 
+        // Disable Nagle's algorithm for instant packet sending
+        if (stream._client && stream._client._sock) {
+          stream._client._sock.setNoDelay(true);
+        }
+        
         sshSessions.set(sessionId, { conn, stream });
 
+        // Send data immediately without buffering
         stream.on('data', data => {
-          mainWindow?.webContents.send('terminal:data', sessionId, data.toString());
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('terminal:data', sessionId, data.toString('utf8'));
+          }
         });
 
         stream.on('close', () => {
@@ -198,26 +281,45 @@ ipcMain.handle('ssh:connect', async (event, sessionId, config) => {
       reject(new Error(err.message || 'Authentication failed. Check your credentials.'));
     });
 
-    conn.connect({
+    // Disable Nagle on the underlying socket for minimal latency
+    const socketOptions = {
       host: config.host,
       port: config.port || 22,
       username: config.username,
       password: config.password,
       privateKey: config.privateKey,
       tryKeyboard: true,
-      readyTimeout: 10000
+      readyTimeout: 10000,
+      keepaliveInterval: 5000,
+      keepaliveCountMax: 3,
+      compress: false,
+      sock: undefined
+    };
+
+    // Create socket with nodelay
+    const socket = new net.Socket();
+    socket.setNoDelay(true);
+    socket.setKeepAlive(true, 5000);
+    
+    socket.connect(config.port || 22, config.host, () => {
+      socketOptions.sock = socket;
+      conn.connect(socketOptions);
+    });
+
+    socket.on('error', (err) => {
+      reject(new Error(err.message || 'Connection failed'));
     });
   });
 });
 
-ipcMain.handle('ssh:write', (event, sessionId, data) => {
+ipcMain.on('ssh:write', (event, sessionId, data) => {
   const session = sshSessions.get(sessionId);
   if (session?.stream) {
     session.stream.write(data);
   }
 });
 
-ipcMain.handle('ssh:resize', (event, sessionId, cols, rows) => {
+ipcMain.on('ssh:resize', (event, sessionId, cols, rows) => {
   const session = sshSessions.get(sessionId);
   if (session?.stream) {
     session.stream.setWindow(rows, cols, 0, 0);
@@ -247,6 +349,10 @@ ipcMain.handle('db:addServer', (event, server) => {
 
 ipcMain.handle('db:updateServer', (event, id, server) => {
   return db.updateServer(id, server);
+});
+
+ipcMain.handle('db:updateServerColor', (event, id, color) => {
+  return db.updateServerColor(id, color);
 });
 
 ipcMain.handle('db:deleteServer', (event, id) => {
