@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { app } = require('electron');
 
 let data = {
@@ -14,6 +15,252 @@ let data = {
 
 let dbPath = null;
 let dbDir = null;
+
+// Encryption constants
+const ALGORITHM = 'aes-256-gcm';
+const KEY_LENGTH = 32;
+const IV_LENGTH = 16;
+const SALT_LENGTH = 32;
+const TAG_LENGTH = 16;
+const PBKDF2_ITERATIONS = 100000;
+
+// In-memory vault state (never persisted directly)
+let vaultKey = null;
+let isVaultUnlocked = false;
+
+// Derive encryption key from master password using PBKDF2
+function deriveKey(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+}
+
+// Encrypt a string
+function encrypt(text, key) {
+  if (!text || !key) return null;
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag();
+  // Return format: iv:authTag:encrypted
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+}
+
+// Decrypt a string
+function decrypt(encryptedData, key) {
+  if (!encryptedData || !key) return null;
+  try {
+    const parts = encryptedData.split(':');
+    if (parts.length !== 3) return null;
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) {
+    console.error('[PolarOps/DB] Decryption failed:', e.message);
+    return null;
+  }
+}
+
+// Hash master password for verification
+function hashPassword(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 64, 'sha512').toString('hex');
+}
+
+// Check if vault is enabled
+function isVaultEnabled() {
+  return data.settings?.vaultEnabled === 'true' && data.vault?.passwordHash;
+}
+
+// Check if vault is currently unlocked
+function isVaultCurrentlyUnlocked() {
+  return isVaultUnlocked && vaultKey !== null;
+}
+
+// Setup master password (first time setup)
+function setupVault(masterPassword) {
+  if (!masterPassword || masterPassword.length < 4) {
+    throw new Error('Master password must be at least 4 characters');
+  }
+  
+  const salt = crypto.randomBytes(SALT_LENGTH);
+  const passwordHash = hashPassword(masterPassword, salt);
+  const key = deriveKey(masterPassword, salt);
+  
+  // Store vault metadata
+  if (!data.vault) data.vault = {};
+  data.vault.salt = salt.toString('hex');
+  data.vault.passwordHash = passwordHash;
+  data.vault.createdAt = new Date().toISOString();
+  data.settings.vaultEnabled = 'true';
+  
+  // Encrypt all existing server passwords
+  data.servers.forEach(server => {
+    if (server.password && !server.passwordEncrypted) {
+      server.password = encrypt(server.password, key);
+      server.passwordEncrypted = true;
+    }
+    if (server.privateKey && !server.privateKeyEncrypted) {
+      server.privateKey = encrypt(server.privateKey, key);
+      server.privateKeyEncrypted = true;
+    }
+  });
+  
+  // Set vault as unlocked
+  vaultKey = key;
+  isVaultUnlocked = true;
+  
+  save();
+  console.log('[PolarOps/Vault] Vault setup complete');
+  return true;
+}
+
+// Unlock vault with master password
+function unlockVault(masterPassword) {
+  if (!isVaultEnabled()) {
+    throw new Error('Vault is not enabled');
+  }
+  
+  const salt = Buffer.from(data.vault.salt, 'hex');
+  const storedHash = data.vault.passwordHash;
+  const providedHash = hashPassword(masterPassword, salt);
+  
+  if (providedHash !== storedHash) {
+    throw new Error('Invalid master password');
+  }
+  
+  vaultKey = deriveKey(masterPassword, salt);
+  isVaultUnlocked = true;
+  
+  console.log('[PolarOps/Vault] Vault unlocked');
+  return true;
+}
+
+// Lock vault
+function lockVault() {
+  vaultKey = null;
+  isVaultUnlocked = false;
+  console.log('[PolarOps/Vault] Vault locked');
+  return true;
+}
+
+// Change master password
+function changeMasterPassword(currentPassword, newPassword) {
+  if (!isVaultEnabled()) {
+    throw new Error('Vault is not enabled');
+  }
+  
+  // Verify current password
+  const currentSalt = Buffer.from(data.vault.salt, 'hex');
+  const currentHash = hashPassword(currentPassword, currentSalt);
+  if (currentHash !== data.vault.passwordHash) {
+    throw new Error('Current password is incorrect');
+  }
+  
+  const currentKey = deriveKey(currentPassword, currentSalt);
+  
+  // Create new vault credentials
+  const newSalt = crypto.randomBytes(SALT_LENGTH);
+  const newHash = hashPassword(newPassword, newSalt);
+  const newKey = deriveKey(newPassword, newSalt);
+  
+  // Re-encrypt all passwords with new key
+  data.servers.forEach(server => {
+    if (server.password && server.passwordEncrypted) {
+      const decrypted = decrypt(server.password, currentKey);
+      if (decrypted) {
+        server.password = encrypt(decrypted, newKey);
+      }
+    }
+    if (server.privateKey && server.privateKeyEncrypted) {
+      const decrypted = decrypt(server.privateKey, currentKey);
+      if (decrypted) {
+        server.privateKey = encrypt(decrypted, newKey);
+      }
+    }
+  });
+  
+  // Update vault metadata
+  data.vault.salt = newSalt.toString('hex');
+  data.vault.passwordHash = newHash;
+  data.vault.updatedAt = new Date().toISOString();
+  
+  // Update in-memory key
+  vaultKey = newKey;
+  
+  save();
+  console.log('[PolarOps/Vault] Master password changed');
+  return true;
+}
+
+// Disable vault and decrypt all passwords
+function disableVault(masterPassword) {
+  if (!isVaultEnabled()) {
+    throw new Error('Vault is not enabled');
+  }
+  
+  // Verify password
+  const salt = Buffer.from(data.vault.salt, 'hex');
+  const storedHash = data.vault.passwordHash;
+  const providedHash = hashPassword(masterPassword, salt);
+  
+  if (providedHash !== storedHash) {
+    throw new Error('Invalid master password');
+  }
+  
+  const key = deriveKey(masterPassword, salt);
+  
+  // Decrypt all passwords
+  data.servers.forEach(server => {
+    if (server.password && server.passwordEncrypted) {
+      const decrypted = decrypt(server.password, key);
+      server.password = decrypted || server.password;
+      server.passwordEncrypted = false;
+    }
+    if (server.privateKey && server.privateKeyEncrypted) {
+      const decrypted = decrypt(server.privateKey, key);
+      server.privateKey = decrypted || server.privateKey;
+      server.privateKeyEncrypted = false;
+    }
+  });
+  
+  // Remove vault data
+  delete data.vault;
+  data.settings.vaultEnabled = 'false';
+  
+  // Clear in-memory state
+  vaultKey = null;
+  isVaultUnlocked = false;
+  
+  save();
+  console.log('[PolarOps/Vault] Vault disabled');
+  return true;
+}
+
+// Get decrypted password for a server
+function getDecryptedPassword(serverId) {
+  const server = data.servers.find(s => s.id === serverId);
+  if (!server) return null;
+  
+  if (server.passwordEncrypted && vaultKey) {
+    return decrypt(server.password, vaultKey);
+  }
+  return server.password;
+}
+
+// Get decrypted private key for a server
+function getDecryptedPrivateKey(serverId) {
+  const server = data.servers.find(s => s.id === serverId);
+  if (!server) return null;
+  
+  if (server.privateKeyEncrypted && vaultKey) {
+    return decrypt(server.privateKey, vaultKey);
+  }
+  return server.privateKey;
+}
 
 
 function getDbDir() {
@@ -100,14 +347,33 @@ function getServer(id) {
 }
 
 function addServer(server) {
+  let passwordToStore = server.password || null;
+  let privateKeyToStore = server.privateKey || null;
+  let passwordEncrypted = false;
+  let privateKeyEncrypted = false;
+  
+  // Encrypt if vault is enabled and unlocked
+  if (isVaultEnabled() && isVaultCurrentlyUnlocked() && vaultKey) {
+    if (passwordToStore) {
+      passwordToStore = encrypt(passwordToStore, vaultKey);
+      passwordEncrypted = true;
+    }
+    if (privateKeyToStore) {
+      privateKeyToStore = encrypt(privateKeyToStore, vaultKey);
+      privateKeyEncrypted = true;
+    }
+  }
+  
   const newServer = {
     id: Date.now(),
     name: server.name || `${server.username}@${server.host}`,
     host: server.host,
     port: server.port || 22,
     username: server.username,
-    password: server.password || null,
-    privateKey: server.privateKey || null,
+    password: passwordToStore,
+    passwordEncrypted: passwordEncrypted,
+    privateKey: privateKeyToStore,
+    privateKeyEncrypted: privateKeyEncrypted,
     color: server.color || null,
     last_ping_ms: null,
     last_ping_status: 'unknown',
@@ -123,14 +389,33 @@ function addServer(server) {
 function updateServer(id, server) {
   const idx = data.servers.findIndex(s => s.id === id);
   if (idx !== -1) {
+    let passwordToStore = server.password || null;
+    let privateKeyToStore = server.privateKey || null;
+    let passwordEncrypted = false;
+    let privateKeyEncrypted = false;
+    
+    // Encrypt if vault is enabled and unlocked
+    if (isVaultEnabled() && isVaultCurrentlyUnlocked() && vaultKey) {
+      if (passwordToStore) {
+        passwordToStore = encrypt(passwordToStore, vaultKey);
+        passwordEncrypted = true;
+      }
+      if (privateKeyToStore) {
+        privateKeyToStore = encrypt(privateKeyToStore, vaultKey);
+        privateKeyEncrypted = true;
+      }
+    }
+    
     data.servers[idx] = {
       ...data.servers[idx],
       name: server.name,
       host: server.host,
       port: server.port || 22,
       username: server.username,
-      password: server.password || null,
-      privateKey: server.privateKey || null,
+      password: passwordToStore,
+      passwordEncrypted: passwordEncrypted,
+      privateKey: privateKeyToStore,
+      privateKeyEncrypted: privateKeyEncrypted,
       color: server.color !== undefined ? server.color : data.servers[idx].color,
       updated_at: new Date().toISOString()
     };
@@ -283,5 +568,15 @@ module.exports = {
   clearPingHistory,
   getDashboardStats,
   incrementConnectionCount,
-  close
+  close,
+  // Vault functions
+  isVaultEnabled,
+  isVaultCurrentlyUnlocked,
+  setupVault,
+  unlockVault,
+  lockVault,
+  changeMasterPassword,
+  disableVault,
+  getDecryptedPassword,
+  getDecryptedPrivateKey
 };

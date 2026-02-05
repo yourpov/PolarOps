@@ -12,8 +12,72 @@ let activeSessionId = null;
 let skeletonAttempts = 0;
 let savedServers = [];
 let appSettings = {};
+let vaultUnlocked = false;
 
 const terminalThemes = Themes.TerminalThemes;
+
+// Check vault status and show unlock modal if needed
+async function checkVaultStatus() {
+  try {
+    const isEnabled = await window.polar.vault.isEnabled();
+    if (isEnabled) {
+      const isUnlocked = await window.polar.vault.isUnlocked();
+      if (!isUnlocked) {
+        showVaultUnlockModal();
+        return false;
+      }
+      vaultUnlocked = true;
+    }
+    return true;
+  } catch (e) {
+    console.error('[PolarOps/Vault] Failed to check vault status:', e);
+    return true;
+  }
+}
+
+function showVaultUnlockModal() {
+  const modal = document.getElementById('vault-unlock-modal');
+  const passwordInput = document.getElementById('vault-unlock-password');
+  const errorEl = document.getElementById('vault-unlock-error');
+  
+  modal.style.display = 'flex';
+  errorEl.style.display = 'none';
+  passwordInput.value = '';
+  passwordInput.focus();
+}
+
+function hideVaultUnlockModal() {
+  const modal = document.getElementById('vault-unlock-modal');
+  modal.style.display = 'none';
+}
+
+// Get the actual password for a server (decrypted if vault is enabled)
+async function getServerPassword(server) {
+  try {
+    const isEnabled = await window.polar.vault.isEnabled();
+    if (isEnabled && server.passwordEncrypted) {
+      return await window.polar.vault.getDecryptedPassword(server.id);
+    }
+    return server.password;
+  } catch (e) {
+    console.error('[PolarOps/Vault] Failed to get decrypted password:', e);
+    return server.password;
+  }
+}
+
+// Get the actual private key for a server (decrypted if vault is enabled)
+async function getServerPrivateKey(server) {
+  try {
+    const isEnabled = await window.polar.vault.isEnabled();
+    if (isEnabled && server.privateKeyEncrypted) {
+      return await window.polar.vault.getDecryptedPrivateKey(server.id);
+    }
+    return server.privateKey;
+  } catch (e) {
+    console.error('[PolarOps/Vault] Failed to get decrypted private key:', e);
+    return server.privateKey;
+  }
+}
 
 
 async function loadServers() {
@@ -198,12 +262,14 @@ function populateQuickConnect() {
           await window.polar.db.updateServerLastConnected(server.id);
           await window.polar.db.incrementConnectionCount();
           switchView('sessions');
+          // Get decrypted password
+          const password = await getServerPassword(server);
           createSession('ssh', {
             name: server.name,
             host: server.host,
             port: server.port,
             username: server.username,
-            password: server.password,
+            password: password,
             serverId: server.id
           });
         })();
@@ -231,12 +297,14 @@ function populateQuickConnect() {
       await window.polar.db.updateServerLastConnected(server.id);
       await window.polar.db.incrementConnectionCount();
       switchView('sessions');
+      // Get decrypted password
+      const password = await getServerPassword(server);
       createSession('ssh', {
         name: server.name,
         host: server.host,
         port: server.port,
         username: server.username,
-        password: server.password,
+        password: password,
         serverId: server.id
       });
     });
@@ -354,12 +422,14 @@ function showServerContextMenu(event, server, activeSession) {
       await window.polar.db.updateServerLastConnected(server.id);
       await window.polar.db.incrementConnectionCount();
       switchView('sessions');
+      // Get decrypted password
+      const password = await getServerPassword(server);
       createSession('ssh', {
         name: server.name,
         host: server.host,
         port: server.port,
         username: server.username,
-        password: server.password,
+        password: password,
         serverId: server.id
       });
     });
@@ -406,11 +476,173 @@ function createMenuItem(text, onClick) {
 }
 
 (async () => {
-  await loadServers();
   await loadSettings();
+  
+  // Initialize vault modal handlers first so they're ready
+  initVaultModalHandlers();
+  
+  // Check vault status before loading servers
+  const vaultReady = await checkVaultStatus();
+  if (!vaultReady) {
+    // Wait for vault to be unlocked before proceeding
+    // The vault unlock form will continue initialization when unlocked
+    return;
+  }
+  
+  await loadServers();
   populateQuickConnect();
   switchView('dashboard');
 })();
+
+// Initialize vault modal event handlers
+function initVaultModalHandlers() {
+  // Vault unlock form
+  const unlockForm = document.getElementById('vault-unlock-form');
+  if (unlockForm) {
+    unlockForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('vault-unlock-password').value;
+      const errorEl = document.getElementById('vault-unlock-error');
+      
+      try {
+        await window.polar.vault.unlock(password);
+        vaultUnlocked = true;
+        hideVaultUnlockModal();
+        
+        // Continue app initialization
+        await loadServers();
+        populateQuickConnect();
+        switchView('dashboard');
+      } catch (err) {
+        errorEl.textContent = err.message || 'Invalid password';
+        errorEl.style.display = 'block';
+        document.getElementById('vault-unlock-password').select();
+      }
+    });
+  }
+  
+  // Vault setup form
+  const setupForm = document.getElementById('vault-setup-form');
+  if (setupForm) {
+    setupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('vault-setup-password').value;
+      const confirm = document.getElementById('vault-setup-confirm').value;
+      const errorEl = document.getElementById('vault-setup-error');
+      
+      if (password !== confirm) {
+        errorEl.textContent = 'Passwords do not match';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      try {
+        await window.polar.vault.setup(password);
+        vaultUnlocked = true;
+        document.getElementById('vault-setup-modal').style.display = 'none';
+        showSettingsContent(); // Refresh settings view
+        showToast('Password vault enabled successfully', 'success');
+      } catch (err) {
+        errorEl.textContent = err.message || 'Failed to setup vault';
+        errorEl.style.display = 'block';
+      }
+    });
+    
+    document.getElementById('vault-setup-cancel')?.addEventListener('click', () => {
+      document.getElementById('vault-setup-modal').style.display = 'none';
+    });
+    
+    document.getElementById('vault-setup-close-x')?.addEventListener('click', () => {
+      document.getElementById('vault-setup-modal').style.display = 'none';
+    });
+  }
+  
+  // Vault change password form
+  const changeForm = document.getElementById('vault-change-form');
+  if (changeForm) {
+    changeForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const current = document.getElementById('vault-change-current').value;
+      const newPass = document.getElementById('vault-change-new').value;
+      const confirm = document.getElementById('vault-change-confirm').value;
+      const errorEl = document.getElementById('vault-change-error');
+      
+      if (newPass !== confirm) {
+        errorEl.textContent = 'New passwords do not match';
+        errorEl.style.display = 'block';
+        return;
+      }
+      
+      try {
+        await window.polar.vault.changePassword(current, newPass);
+        document.getElementById('vault-change-modal').style.display = 'none';
+        showToast('Master password changed successfully', 'success');
+      } catch (err) {
+        errorEl.textContent = err.message || 'Failed to change password';
+        errorEl.style.display = 'block';
+      }
+    });
+    
+    document.getElementById('vault-change-cancel')?.addEventListener('click', () => {
+      document.getElementById('vault-change-modal').style.display = 'none';
+    });
+    
+    document.getElementById('vault-change-close-x')?.addEventListener('click', () => {
+      document.getElementById('vault-change-modal').style.display = 'none';
+    });
+  }
+  
+  // Vault disable form
+  const disableForm = document.getElementById('vault-disable-form');
+  if (disableForm) {
+    disableForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('vault-disable-password').value;
+      const errorEl = document.getElementById('vault-disable-error');
+      
+      try {
+        await window.polar.vault.disable(password);
+        vaultUnlocked = false;
+        document.getElementById('vault-disable-modal').style.display = 'none';
+        showSettingsContent(); // Refresh settings view
+        showToast('Password encryption disabled', 'info');
+      } catch (err) {
+        errorEl.textContent = err.message || 'Failed to disable vault';
+        errorEl.style.display = 'block';
+      }
+    });
+    
+    document.getElementById('vault-disable-cancel')?.addEventListener('click', () => {
+      document.getElementById('vault-disable-modal').style.display = 'none';
+    });
+    
+    document.getElementById('vault-disable-close-x')?.addEventListener('click', () => {
+      document.getElementById('vault-disable-modal').style.display = 'none';
+    });
+  }
+}
+
+// Simple toast notification
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 10000; display: flex; flex-direction: column; gap: 8px;';
+    document.body.appendChild(container);
+  }
+  
+  const toast = document.createElement('div');
+  const bgColor = type === 'success' ? 'var(--green)' : type === 'error' ? 'var(--red)' : 'var(--accent)';
+  toast.style.cssText = `background: ${bgColor}; color: white; padding: 10px 16px; border-radius: 6px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); animation: slideIn 0.2s ease;`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.animation = 'slideOut 0.2s ease';
+    setTimeout(() => toast.remove(), 200);
+  }, 3000);
+}
 
 // Quick connect skeleton is handled by populateQuickConnect()
 
@@ -1498,12 +1730,14 @@ async function showServersContent() {
         await window.polar.db.updateServerLastConnected(serverId);
         await window.polar.db.incrementConnectionCount();
         switchView('sessions');
+        // Get decrypted password
+        const password = await getServerPassword(server);
         createSession('ssh', {
           name: server.name,
           host: server.host,
           port: server.port,
           username: server.username,
-          password: server.password
+          password: password
         });
       }
     });
@@ -1619,6 +1853,14 @@ async function showSettingsContent() {
     console.error('[PolarOps/Settings] Failed to get DB info:', e);
   }
   
+  // Check vault status
+  let vaultEnabled = false;
+  try {
+    vaultEnabled = await window.polar.vault.isEnabled();
+  } catch (e) {
+    console.error('[PolarOps/Settings] Failed to check vault status:', e);
+  }
+  
   const themeOptions = [
     { value: 'polar-dark', label: 'Polar Dark (Default)' },
     { value: 'ocean', label: 'Ocean' },
@@ -1684,6 +1926,12 @@ async function showSettingsContent() {
           <path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"/>
         </svg>
         Connection
+      </button>
+      <button class="settings-tab" data-tab="security">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
+        Security
       </button>
       <button class="settings-tab" data-tab="data">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -1936,6 +2184,97 @@ async function showSettingsContent() {
         </div>
       </div>
       
+      <!-- Security Panel -->
+      <div class="settings-panel" data-panel="security">
+        <div class="setting-group">
+          <h3 class="setting-group-title">Password Vault</h3>
+          <div class="setting-item" data-search="encryption password vault master security">
+            <div class="setting-info">
+              <label class="setting-label">Password Encryption</label>
+              <p class="setting-desc">${vaultEnabled ? 'Your server passwords are encrypted with a master password' : 'Server passwords are stored in plain text'}</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              ${vaultEnabled ? `
+                <span style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; font-size: 11px; color: var(--green);">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                  </svg>
+                  Enabled
+                </span>
+              ` : `
+                <span style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; font-size: 11px; color: var(--red);">
+                  <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                  </svg>
+                  Disabled
+                </span>
+              `}
+            </div>
+          </div>
+          ${vaultEnabled ? `
+            <div class="setting-item" data-search="change master password vault">
+              <div class="setting-info">
+                <label class="setting-label">Change Master Password</label>
+                <p class="setting-desc">Update your vault's master password</p>
+              </div>
+              <button id="vault-change-password-btn" class="btn-secondary" style="padding: 8px 16px; font-size: 11px;">
+                Change Password
+              </button>
+            </div>
+            <div class="setting-item" data-search="disable encryption vault password">
+              <div class="setting-info">
+                <label class="setting-label">Disable Encryption</label>
+                <p class="setting-desc">Remove encryption and store passwords in plain text</p>
+              </div>
+              <button id="vault-disable-btn" class="btn-secondary" style="padding: 8px 16px; font-size: 11px; color: var(--red); border-color: var(--red);">
+                Disable Vault
+              </button>
+            </div>
+          ` : `
+            <div class="setting-item" data-search="enable encryption vault password setup">
+              <div class="setting-info">
+                <label class="setting-label">Enable Encryption</label>
+                <p class="setting-desc">Protect your server passwords with a master password</p>
+              </div>
+              <button id="vault-setup-btn" class="btn-primary" style="padding: 8px 16px; font-size: 11px; display: flex; align-items: center; gap: 6px;">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+                Setup Vault
+              </button>
+            </div>
+          `}
+        </div>
+        <div class="setting-group">
+          <h3 class="setting-group-title">Security Information</h3>
+          <div class="setting-item" data-search="how encryption works aes security">
+            <div class="setting-info" style="width: 100%;">
+              <label class="setting-label">How It Works</label>
+              <div style="margin-top: 8px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; font-size: 11px; color: var(--text-muted);">
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <span style="color: var(--accent); font-weight: 600;">1.</span>
+                    <span>Your master password is used to derive an encryption key using PBKDF2 with 100,000 iterations</span>
+                  </div>
+                  <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <span style="color: var(--accent); font-weight: 600;">2.</span>
+                    <span>Server passwords are encrypted using AES-256-GCM, a military-grade encryption standard</span>
+                  </div>
+                  <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <span style="color: var(--accent); font-weight: 600;">3.</span>
+                    <span>Each time you start PolarOps, you'll need to enter your master password to unlock the vault</span>
+                  </div>
+                  <div style="display: flex; align-items: flex-start; gap: 8px;">
+                    <span style="color: var(--accent); font-weight: 600;">4.</span>
+                    <span>Your master password is never stored - only a secure hash is kept for verification</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Data Panel -->
       <div class="settings-panel" data-panel="data">
         <div class="setting-group">
@@ -2113,7 +2452,7 @@ async function showSettingsContent() {
           <div class="setting-item" data-search="credentials passwords security encryption">
             <div class="setting-info">
               <label class="setting-label">Credentials Storage</label>
-              <p class="setting-desc">⚠️ Server passwords are stored in plaintext in the local database. Consider using SSH keys for enhanced security in production environments.</p>
+              <p class="setting-desc">${vaultEnabled ? '✓ Server passwords are encrypted with AES-256-GCM using your master password.' : '⚠️ Server passwords are stored in plaintext in the local database. Enable the Password Vault in Security settings for encryption.'}</p>
             </div>
           </div>
           <div class="setting-item" data-search="telemetry analytics tracking">
@@ -2394,6 +2733,31 @@ async function showSettingsContent() {
     } catch (e) {
       console.error('[PolarOps/Settings] Failed to open folder:', e);
     }
+  });
+  
+  // Vault settings event listeners
+  document.getElementById('vault-setup-btn')?.addEventListener('click', () => {
+    document.getElementById('vault-setup-modal').style.display = 'flex';
+    document.getElementById('vault-setup-password').value = '';
+    document.getElementById('vault-setup-confirm').value = '';
+    document.getElementById('vault-setup-error').style.display = 'none';
+    document.getElementById('vault-setup-password').focus();
+  });
+  
+  document.getElementById('vault-change-password-btn')?.addEventListener('click', () => {
+    document.getElementById('vault-change-modal').style.display = 'flex';
+    document.getElementById('vault-change-current').value = '';
+    document.getElementById('vault-change-new').value = '';
+    document.getElementById('vault-change-confirm').value = '';
+    document.getElementById('vault-change-error').style.display = 'none';
+    document.getElementById('vault-change-current').focus();
+  });
+  
+  document.getElementById('vault-disable-btn')?.addEventListener('click', () => {
+    document.getElementById('vault-disable-modal').style.display = 'flex';
+    document.getElementById('vault-disable-password').value = '';
+    document.getElementById('vault-disable-error').style.display = 'none';
+    document.getElementById('vault-disable-password').focus();
   });
   
   document.getElementById('open-github-repo')?.addEventListener('click', () => {

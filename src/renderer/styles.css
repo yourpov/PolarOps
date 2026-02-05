@@ -995,3 +995,44 @@ body {
   background: var(--surface-hover);
 }
 
+/* Toast animation keyframes */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+/* Vault modal styles */
+#vault-unlock-modal .modal-content,
+#vault-setup-modal .modal-content,
+#vault-change-modal .modal-content,
+#vault-disable-modal .modal-content {
+  animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

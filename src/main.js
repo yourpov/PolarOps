@@ -462,6 +462,43 @@ ipcMain.handle('db:incrementConnectionCount', () => {
   return db.incrementConnectionCount();
 });
 
+// Vault IPC handlers
+ipcMain.handle('vault:isEnabled', () => {
+  return db.isVaultEnabled();
+});
+
+ipcMain.handle('vault:isUnlocked', () => {
+  return db.isVaultCurrentlyUnlocked();
+});
+
+ipcMain.handle('vault:setup', (event, masterPassword) => {
+  return db.setupVault(masterPassword);
+});
+
+ipcMain.handle('vault:unlock', (event, masterPassword) => {
+  return db.unlockVault(masterPassword);
+});
+
+ipcMain.handle('vault:lock', () => {
+  return db.lockVault();
+});
+
+ipcMain.handle('vault:changePassword', (event, currentPassword, newPassword) => {
+  return db.changeMasterPassword(currentPassword, newPassword);
+});
+
+ipcMain.handle('vault:disable', (event, masterPassword) => {
+  return db.disableVault(masterPassword);
+});
+
+ipcMain.handle('vault:getDecryptedPassword', (event, serverId) => {
+  return db.getDecryptedPassword(serverId);
+});
+
+ipcMain.handle('vault:getDecryptedPrivateKey', (event, serverId) => {
+  return db.getDecryptedPrivateKey(serverId);
+});
+
 ipcMain.handle('sftp:connect', async (event, sessionId) => {
   const session = sshSessions.get(sessionId);
   if (!session || !session.conn) {
