@@ -371,6 +371,155 @@
     </div>
   </div>
 
+  <!-- Vault Unlock Modal -->
+  <div id="vault-unlock-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg width="24" height="24" fill="none" stroke="var(--accent)" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+          <h3 class="modal-title">Unlock Vault</h3>
+        </div>
+      </div>
+      <form id="vault-unlock-form" class="modal-form">
+        <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
+          Enter your master password to unlock encrypted server credentials.
+        </p>
+        <div class="form-group">
+          <label class="form-label">Master Password</label>
+          <input type="password" id="vault-unlock-password" class="form-input" placeholder="Enter master password" required autofocus>
+          <p id="vault-unlock-error" style="color: var(--red); font-size: 11px; margin-top: 6px; display: none;"></p>
+        </div>
+        <div class="modal-actions">
+          <button type="submit" class="btn-primary" style="width: 100%;">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>
+            </svg>
+            Unlock
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Vault Setup Modal -->
+  <div id="vault-setup-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 450px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg width="24" height="24" fill="none" stroke="var(--accent)" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+          <h3 class="modal-title">Setup Password Vault</h3>
+        </div>
+        <button id="vault-setup-close-x" class="modal-close-btn" type="button">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <form id="vault-setup-form" class="modal-form">
+        <div style="background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+          <p style="color: var(--text); font-size: 12px; margin: 0;">
+            <strong>🔐 Encrypt your server passwords</strong><br>
+            <span style="color: var(--text-muted);">Create a master password to encrypt all stored server credentials. You'll need to enter this password when starting PolarOps.</span>
+          </p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Master Password</label>
+          <input type="password" id="vault-setup-password" class="form-input" placeholder="Create a strong password" required minlength="4">
+          <p style="color: var(--text-muted); font-size: 10px; margin-top: 4px;">Minimum 4 characters. Use a strong, memorable password.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm Password</label>
+          <input type="password" id="vault-setup-confirm" class="form-input" placeholder="Confirm your password" required>
+          <p id="vault-setup-error" style="color: var(--red); font-size: 11px; margin-top: 6px; display: none;"></p>
+        </div>
+        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 8px; padding: 10px; margin-bottom: 16px;">
+          <p style="color: #eab308; font-size: 11px; margin: 0; display: flex; align-items: flex-start; gap: 8px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink: 0; margin-top: 1px;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span><strong>Important:</strong> If you forget your master password, encrypted passwords cannot be recovered. Make sure to remember it!</span>
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="vault-setup-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 6px;">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+            Enable Encryption
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Vault Change Password Modal -->
+  <div id="vault-change-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Change Master Password</h3>
+        <button id="vault-change-close-x" class="modal-close-btn" type="button">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <form id="vault-change-form" class="modal-form">
+        <div class="form-group">
+          <label class="form-label">Current Password</label>
+          <input type="password" id="vault-change-current" class="form-input" placeholder="Enter current password" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input type="password" id="vault-change-new" class="form-input" placeholder="Enter new password" required minlength="4">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New Password</label>
+          <input type="password" id="vault-change-confirm" class="form-input" placeholder="Confirm new password" required>
+          <p id="vault-change-error" style="color: var(--red); font-size: 11px; margin-top: 6px; display: none;"></p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="vault-change-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Change Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Vault Disable Modal -->
+  <div id="vault-disable-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Disable Password Encryption</h3>
+        <button id="vault-disable-close-x" class="modal-close-btn" type="button">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <form id="vault-disable-form" class="modal-form">
+        <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px; margin-bottom: 16px;">
+          <p style="color: var(--red); font-size: 11px; margin: 0;">
+            <strong>⚠️ Warning:</strong> Disabling encryption will store all server passwords in plain text. This is less secure.
+          </p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Enter Master Password to Confirm</label>
+          <input type="password" id="vault-disable-password" class="form-input" placeholder="Enter master password" required>
+          <p id="vault-disable-error" style="color: var(--red); font-size: 11px; margin-top: 6px; display: none;"></p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="vault-disable-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-danger">Disable Encryption</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

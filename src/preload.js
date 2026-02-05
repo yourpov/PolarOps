@@ -75,6 +75,18 @@ window.polar = {
     incrementConnectionCount: () => ipcRenderer.invoke('db:incrementConnectionCount')
   },
   
+  vault: {
+    isEnabled: () => ipcRenderer.invoke('vault:isEnabled'),
+    isUnlocked: () => ipcRenderer.invoke('vault:isUnlocked'),
+    setup: (masterPassword) => ipcRenderer.invoke('vault:setup', masterPassword),
+    unlock: (masterPassword) => ipcRenderer.invoke('vault:unlock', masterPassword),
+    lock: () => ipcRenderer.invoke('vault:lock'),
+    changePassword: (currentPassword, newPassword) => ipcRenderer.invoke('vault:changePassword', currentPassword, newPassword),
+    disable: (masterPassword) => ipcRenderer.invoke('vault:disable', masterPassword),
+    getDecryptedPassword: (serverId) => ipcRenderer.invoke('vault:getDecryptedPassword', serverId),
+    getDecryptedPrivateKey: (serverId) => ipcRenderer.invoke('vault:getDecryptedPrivateKey', serverId)
+  },
+  
   server: {
     ping: (serverId, host, port) => ipcRenderer.invoke('server:ping', serverId, host, port),
     pingAll: () => ipcRenderer.invoke('server:pingAll')
