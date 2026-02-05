@@ -1,4 +1,16 @@
-# PolarOps
+<div align="center" id="top">
+
+# Polar Ops
+
+</div>
+<p align="center">
+  <img alt="Top language" src="https://img.shields.io/github/languages/top/yourpov/PolarOps?color=56BEB8">
+  <img alt="Language count" src="https://img.shields.io/github/languages/count/yourpov/PolarOps?color=56BEB8">
+  <img alt="Repository size" src="https://img.shields.io/github/repo-size/yourpov/PolarOps?color=56BEB8">
+  <img alt="License" src="https://img.shields.io/github/license/yourpov/PolarOps?color=56BEB8">
+</p>
+
+---
 
 SSH terminal & server manager for Windows. Built with Electron.
 
