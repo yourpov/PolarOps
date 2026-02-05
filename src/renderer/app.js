@@ -76,35 +76,343 @@ async function addServer(config) {
     password: config.password
   });
   savedServers = await window.polar.db.getServers();
+  populateQuickConnect();
   return id;
 }
 
 async function deleteServer(id) {
   await window.polar.db.deleteServer(id);
   savedServers = await window.polar.db.getServers();
+  populateQuickConnect();
+}
+
+// Helper to check if a server has an active session
+function getActiveSessionForServer(server) {
+  for (const [id, session] of sessions.entries()) {
+    if (session.type === 'ssh' && session.config) {
+      if (session.config.host === server.host && 
+          session.config.username === server.username &&
+          (session.config.port || 22) === (server.port || 22)) {
+        return session;
+      }
+    }
+  }
+  return null;
+}
+
+// Helper to get ALL active sessions for a server
+function getAllActiveSessionsForServer(server) {
+  const activeSessions = [];
+  for (const [id, session] of sessions.entries()) {
+    if (session.type === 'ssh' && session.config) {
+      if (session.config.host === server.host && 
+          session.config.username === server.username &&
+          (session.config.port || 22) === (server.port || 22)) {
+        activeSessions.push(session);
+      }
+    }
+  }
+  return activeSessions;
+}
+
+// Color options for server labels
+const serverColorOptions = [
+  { name: 'None', value: null },
+  { name: 'Red', value: '#ef4444' },
+  { name: 'Orange', value: '#f97316' },
+  { name: 'Yellow', value: '#eab308' },
+  { name: 'Green', value: '#22c55e' },
+  { name: 'Blue', value: '#3b82f6' },
+  { name: 'Purple', value: '#a855f7' },
+  { name: 'Pink', value: '#ec4899' },
+  { name: 'Cyan', value: '#06b6d4' }
+];
+
+function populateQuickConnect() {
+  const list = document.getElementById('quick-connect-list');
+  if (!list) return;
+  
+  const skeleton = document.getElementById('quick-connect-skeleton');
+  if (skeleton) skeleton.remove();
+  
+  // Clear existing items
+  list.innerHTML = '';
+  
+  if (savedServers.length === 0) {
+    list.innerHTML = `
+      <div class="empty-sessions" style="padding: 16px 8px; text-align: center;">
+        <p style="font-size: 11px; color: var(--text-muted); margin: 0;">No saved servers</p>
+      </div>
+    `;
+    return;
+  }
+  
+  savedServers.forEach(server => {
+    const item = document.createElement('div');
+    item.className = 'session-item quick-connect-item';
+    item.dataset.serverId = server.id;
+    
+    // Check if this server has an active session
+    const activeSession = getActiveSessionForServer(server);
+    const isActive = activeSession !== null;
+    
+    // Dot color: green if active session, grey if not
+    const dotColor = isActive ? 'var(--green)' : 'var(--text-muted)';
+    
+    // Build ping tooltip
+    let pingTooltip = '';
+    if (server.last_ping_ms !== null && server.last_ping_status === 'online') {
+      pingTooltip = `Last ping: ${server.last_ping_ms}ms`;
+    } else if (server.last_ping_status && server.last_ping_status !== 'unknown') {
+      pingTooltip = `Last ping: ${server.last_ping_status}`;
+    } else {
+      pingTooltip = 'No ping data';
+    }
+    
+    // Color indicator bar if server has a color
+    const colorBar = server.color ? `<div class="server-color-bar" style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: ${server.color}; border-radius: 2px 0 0 2px;"></div>` : '';
+    
+    item.style.position = 'relative';
+    item.innerHTML = `
+      ${colorBar}
+      <div class="session-dot" title="${pingTooltip}" style="width: 6px; height: 6px; border-radius: 50%; background: ${dotColor}; margin-right: 8px; flex-shrink: 0; cursor: help;${isActive ? ' box-shadow: 0 0 4px var(--green);' : ''}"></div>
+      <span class="session-name" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;${server.color ? ' padding-left: 4px;' : ''}" title="Double-click to connect">${server.name}</span>
+      <span class="dblclick-hint" style="display: none; font-size: 9px; color: var(--accent); white-space: nowrap; margin-left: 4px;">click again</span>
+    `;
+    
+    let connectClickPending = false;
+    let connectClickTimeout = null;
+    
+    // Single click shows hint, double click connects
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.session-dot')) return; // Ignore clicks on the dot
+      
+      if (connectClickPending) {
+        // Second click - connect
+        clearTimeout(connectClickTimeout);
+        connectClickPending = false;
+        item.querySelector('.dblclick-hint').style.display = 'none';
+        item.style.background = '';
+        
+        (async () => {
+          await window.polar.db.updateServerLastConnected(server.id);
+          await window.polar.db.incrementConnectionCount();
+          switchView('sessions');
+          createSession('ssh', {
+            name: server.name,
+            host: server.host,
+            port: server.port,
+            username: server.username,
+            password: server.password,
+            serverId: server.id
+          });
+        })();
+      } else {
+        // First click - show hint
+        connectClickPending = true;
+        item.querySelector('.dblclick-hint').style.display = 'inline';
+        item.style.background = 'var(--accent-dim)';
+        
+        connectClickTimeout = setTimeout(() => {
+          connectClickPending = false;
+          item.querySelector('.dblclick-hint').style.display = 'none';
+          item.style.background = '';
+        }, 1500);
+      }
+    });
+    
+    // Double click still works as backup
+    item.addEventListener('dblclick', async () => {
+      clearTimeout(connectClickTimeout);
+      connectClickPending = false;
+      item.querySelector('.dblclick-hint').style.display = 'none';
+      item.style.background = '';
+      
+      await window.polar.db.updateServerLastConnected(server.id);
+      await window.polar.db.incrementConnectionCount();
+      switchView('sessions');
+      createSession('ssh', {
+        name: server.name,
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+        serverId: server.id
+      });
+    });
+    
+    // Right click context menu
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showServerContextMenu(e, server, activeSession);
+    });
+    
+    list.appendChild(item);
+  });
+}
+
+function showServerContextMenu(event, server, activeSession) {
+  // Remove any existing context menu
+  const existingMenu = document.querySelector('.server-context-menu');
+  if (existingMenu) existingMenu.remove();
+  
+  // Get ALL active sessions for this server
+  const activeSessions = getAllActiveSessionsForServer(server);
+  
+  const menu = document.createElement('div');
+  menu.className = 'server-context-menu';
+  menu.style.cssText = `
+    position: fixed;
+    left: ${event.clientX}px;
+    top: ${event.clientY}px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    min-width: 200px;
+    max-width: 280px;
+    z-index: 10000;
+    padding: 6px;
+    font-size: 12px;
+  `;
+  
+  // Active sessions section
+  if (activeSessions.length > 0) {
+    const sessionHeader = document.createElement('div');
+    sessionHeader.style.cssText = 'padding: 6px 10px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); margin-bottom: 4px;';
+    sessionHeader.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <div style="width: 6px; height: 6px; background: var(--green); border-radius: 50%; box-shadow: 0 0 4px var(--green);"></div>
+        ${activeSessions.length} Active Session${activeSessions.length > 1 ? 's' : ''}
+      </div>
+    `;
+    menu.appendChild(sessionHeader);
+    
+    // List each active session
+    activeSessions.forEach((session, index) => {
+      const sessionItem = document.createElement('button');
+      const tabColor = session.tabColor || null;
+      const colorIndicator = tabColor 
+        ? `<div style="width: 8px; height: 8px; border-radius: 2px; background: ${tabColor}; flex-shrink: 0;"></div>` 
+        : `<div style="width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; box-shadow: 0 0 4px var(--green);"></div>`;
+      
+      const isCurrentSession = session.id === activeSessionId;
+      
+      sessionItem.style.cssText = `
+        width: 100%; 
+        padding: 8px 10px; 
+        background: ${isCurrentSession ? 'var(--accent-dim)' : 'transparent'}; 
+        border: none;
+        border-left: 3px solid ${tabColor || 'transparent'};
+        color: var(--text); 
+        font-size: 12px; 
+        text-align: left; 
+        cursor: pointer;
+        border-radius: 4px; 
+        transition: background 100ms ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 2px;
+      `;
+      
+      sessionItem.innerHTML = `
+        ${colorIndicator}
+        <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${session.name}</span>
+        ${isCurrentSession ? '<span style="font-size: 10px; color: var(--accent);">●</span>' : ''}
+      `;
+      
+      sessionItem.addEventListener('mouseenter', () => {
+        if (!isCurrentSession) sessionItem.style.background = 'var(--bg-tertiary)';
+      });
+      sessionItem.addEventListener('mouseleave', () => {
+        sessionItem.style.background = isCurrentSession ? 'var(--accent-dim)' : 'transparent';
+      });
+      
+      sessionItem.addEventListener('click', () => {
+        switchToSession(session.id);
+        switchView('sessions');
+        menu.remove();
+      });
+      
+      menu.appendChild(sessionItem);
+    });
+    
+  } else {
+    const noSession = document.createElement('div');
+    noSession.style.cssText = 'padding: 8px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; color: var(--text-muted);';
+    noSession.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <div style="width: 6px; height: 6px; background: var(--text-muted); border-radius: 50%;"></div>
+        No active sessions
+      </div>
+    `;
+    menu.appendChild(noSession);
+    
+    // Connect button
+    const connectBtn = createMenuItem('Connect', async () => {
+      await window.polar.db.updateServerLastConnected(server.id);
+      await window.polar.db.incrementConnectionCount();
+      switchView('sessions');
+      createSession('ssh', {
+        name: server.name,
+        host: server.host,
+        port: server.port,
+        username: server.username,
+        password: server.password,
+        serverId: server.id
+      });
+    });
+    menu.appendChild(connectBtn);
+  }
+  
+  document.body.appendChild(menu);
+  
+  // Adjust position if menu goes off screen
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) {
+    menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+  }
+  if (rect.bottom > window.innerHeight) {
+    menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+  }
+  
+  // Close menu on click outside
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeMenu), 0);
+}
+
+function createMenuItem(text, onClick) {
+  const item = document.createElement('button');
+  item.style.cssText = `
+    width: 100%; padding: 8px 10px; background: transparent; border: none;
+    color: var(--text); font-size: 12px; text-align: left; cursor: pointer;
+    border-radius: 4px; transition: background 100ms ease;
+  `;
+  item.textContent = text;
+  item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-tertiary)');
+  item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+  item.addEventListener('click', () => {
+    onClick();
+    const menu = document.querySelector('.server-context-menu');
+    if (menu) menu.remove();
+  });
+  return item;
 }
 
 (async () => {
   await loadServers();
   await loadSettings();
+  populateQuickConnect();
   switchView('dashboard');
 })();
 
-setTimeout(() => {
-  const skeleton = document.getElementById('sessions-skeleton');
-  if (skeleton && sessions.size === 0) {
-    skeletonAttempts++;
-    if (skeletonAttempts >= 3) {
-      skeleton.innerHTML = `
-        <div class="empty-sessions">
-          <img src="../../assets/img/polar bear removed bg [256x256].png" alt="">
-          <h3>No Active Servers</h3>
-          <p>Connect to a server to get started</p>
-        </div>
-      `;
-    }
-  }
-}, 4500);
+// Quick connect skeleton is handled by populateQuickConnect()
 
 class Session {
   constructor(id, type = 'local', config = null) {
@@ -120,16 +428,28 @@ class Session {
       fontSize: parseInt(appSettings.fontSize) || 13,
       fontFamily: '"JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace',
       cursorBlink: appSettings.cursorBlink !== false,
-      cursorStyle: appSettings.cursorStyle || 'block',
-      scrollback: parseInt(appSettings.scrollbackLines) || 10000,
+      cursorStyle: appSettings.cursorStyle || 'bar',
+      cursorWidth: 2,
+      cursorInactiveStyle: 'outline',
+      scrollback: parseInt(appSettings.scrollbackLines) || 5000,
       allowTransparency: true,
-      letterSpacing: 0,
-      lineHeight: 1.4,
+      letterSpacing: 0.3,
+      lineHeight: 1.3,
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 1,
-      bellStyle: appSettings.bellSound ? 'sound' : 'none',
+      bellStyle: 'none',
       wordSeparator: ' ()[]{}\'"',
-      rightClickSelectsWord: false
+      rightClickSelectsWord: false,
+      fastScrollModifier: 'alt',
+      fastScrollSensitivity: 10,
+      smoothScrollDuration: 0,
+      scrollSensitivity: 1,
+      overviewRulerWidth: 0,
+      rescaleOverlappingGlyphs: true,
+      windowsPty: {
+        backend: 'conpty',
+        buildNumber: 18362
+      }
     });
     
     this.fitAddon = new FitAddon();
@@ -475,8 +795,10 @@ function createSession(type = 'local', config = null) {
   
   const settingsContent = document.getElementById('settings-content');
   const serversContent = document.getElementById('servers-content');
+  const dashboardContent = document.getElementById('dashboard-content');
   if (settingsContent) settingsContent.style.display = 'none';
   if (serversContent) serversContent.style.display = 'none';
+  if (dashboardContent) dashboardContent.style.display = 'none';
   
   document.getElementById('terminal-container').appendChild(session.element);
   document.getElementById('welcome-screen').style.display = 'none';
@@ -486,43 +808,14 @@ function createSession(type = 'local', config = null) {
   addTab(session);
   session.start();
   switchToSession(id);
+  
+  // Refresh Quick Connect to show active session indicator
+  populateQuickConnect();
 }
 
 function addSessionToSidebar(session) {
-  const list = document.getElementById('sessions-list');
-  
-  const skeleton = document.getElementById('sessions-skeleton');
-  if (skeleton) skeleton.remove();
-  
-  const item = document.createElement('div');
-  item.className = 'session-item';
-  item.id = `session-${session.id}`;
-  item.innerHTML = `
-    <div class="session-dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 8px; flex-shrink: 0;"></div>
-    <span class="session-name" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${session.name}</span>
-    <button class="session-close">
-      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
-      </svg>
-    </button>
-  `;
-  
-  item.addEventListener('click', (e) => {
-    if (!e.target.closest('.session-close')) {
-      switchToSession(session.id);
-    }
-  });
-  
-  item.addEventListener('contextmenu', (e) => {
-    showContextMenu(e, session.id);
-  });
-  
-  item.querySelector('.session-close').addEventListener('click', (e) => {
-    e.stopPropagation();
-    closeSession(session.id);
-  });
-  
-  list.appendChild(item);
+  // Sessions are now displayed only in the tabs bar at the top
+  // Quick Connect section shows saved servers instead
 }
 
 function addTab(session) {
@@ -587,9 +880,36 @@ function addTab(session) {
     showContextMenu(e, session.id);
   });
   
+  let closeClickPending = false;
+  let closeClickTimeout = null;
+  
   tab.querySelector('.tab-close').addEventListener('click', (e) => {
     e.stopPropagation();
-    closeSession(session.id);
+    
+    if (closeClickPending) {
+      // Second click - close the session
+      clearTimeout(closeClickTimeout);
+      closeClickPending = false;
+      closeSession(session.id, true); // skip confirm
+    } else {
+      // First click - change tab name to hint
+      closeClickPending = true;
+      const tabName = tab.querySelector('.tab-name');
+      const closeBtn = tab.querySelector('.tab-close');
+      const originalName = tabName.textContent;
+      tabName.textContent = 'Close?';
+      tabName.style.color = 'var(--red)';
+      closeBtn.style.background = 'var(--red)';
+      closeBtn.style.color = 'white';
+      
+      closeClickTimeout = setTimeout(() => {
+        closeClickPending = false;
+        tabName.textContent = originalName;
+        tabName.style.color = '';
+        closeBtn.style.background = '';
+        closeBtn.style.color = '';
+      }, 2000);
+    }
   });
   
   container.appendChild(tab);
@@ -597,6 +917,11 @@ function addTab(session) {
 
 function switchToSession(id) {
   if (activeSessionId === id) return;
+  
+  // Hide all terminal wrappers first
+  sessions.forEach((s, sessionId) => {
+    s.element.style.display = 'none';
+  });
   
   if (activeSessionId !== null) {
     const prevSession = sessions.get(activeSessionId);
@@ -611,6 +936,7 @@ function switchToSession(id) {
   State.activeSessionId = id;
   const session = sessions.get(id);
   if (session) {
+    session.element.style.display = 'block';
     session.activate();
     document.getElementById(`session-${id}`)?.classList.add('active');
     document.getElementById(`tab-${id}`)?.classList.add('active');
@@ -640,6 +966,9 @@ async function closeSession(id, skipConfirm = false) {
   document.getElementById(`session-${id}`)?.remove();
   document.getElementById(`tab-${id}`)?.remove();
   
+  // Refresh Quick Connect to update active session indicators
+  populateQuickConnect();
+  
   if (activeSessionId === id) {
     activeSessionId = null;
     
@@ -665,8 +994,8 @@ document.getElementById('close-btn').addEventListener('click', () => {
 });
 
 document.getElementById('new-session-btn').addEventListener('click', () => {
-  switchView('sessions');
-  createSession('local');
+  document.getElementById('ssh-modal').classList.add('active');
+  document.getElementById('ssh-host')?.focus();
 });
 
 document.getElementById('welcome-new-session').addEventListener('click', () => {
@@ -1017,11 +1346,19 @@ async function showServersContent() {
           <h3 style="color: var(--text-subtle); font-size: 14px; margin-top: 16px;">No servers configured</h3>
           <p style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">Add an SSH server to get started</p>
         </div>
-      ` : savedServers.map(server => `
-        <div class="server-card" data-server-id="${server.id}" data-server-name="${server.name.toLowerCase()}" data-server-host="${server.host.toLowerCase()}">
+      ` : savedServers.map(server => {
+        const activeSession = getActiveSessionForServer(server);
+        const isActive = activeSession !== null;
+        const dotColor = isActive ? 'var(--green)' : 'var(--text-muted)';
+        const dotGlow = isActive ? 'box-shadow: 0 0 6px var(--green);' : '';
+        const colorBar = server.color ? `<div style="position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: ${server.color}; border-radius: 8px 0 0 8px;"></div>` : '';
+        
+        return `
+        <div class="server-card" data-server-id="${server.id}" data-server-name="${server.name.toLowerCase()}" data-server-host="${server.host.toLowerCase()}" style="position: relative; overflow: hidden;">
+          ${colorBar}
           <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div class="activity-dot" data-status="${server.last_ping_status || 'unknown'}" style="background: ${getStatusColor(server.last_ping_status)};"></div>
+              <div class="activity-dot" data-status="${isActive ? 'active' : 'inactive'}" title="${isActive ? 'Active session' : 'No active session'}${server.last_ping_ms ? ' | Last ping: ' + server.last_ping_ms + 'ms' : ''}" style="background: ${dotColor}; ${dotGlow}"></div>
               <h3 style="font-size: 14px; font-weight: 600; color: var(--text);">${server.name}</h3>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
@@ -1067,12 +1404,20 @@ async function showServersContent() {
               </svg>
               <span style="font-size: 12px; color: var(--text-muted);">Last: ${formatLastConnected(server.last_connected)}</span>
             </div>
+            ${isActive ? `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color: var(--green);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+              </svg>
+              <span style="font-size: 12px; color: var(--green);">Session active</span>
+            </div>
+            ` : ''}
           </div>
           <button class="connect-server-btn" data-server-id="${server.id}" style="width: 100%; padding: 8px; background: linear-gradient(135deg, rgba(0, 217, 255, 0.15), rgba(63, 185, 80, 0.15)); border: 1px solid rgba(0, 217, 255, 0.3); border-radius: 6px; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 150ms ease;">
-            Connect
+            ${isActive ? 'New Session' : 'Connect'}
           </button>
         </div>
-      `).join('')}
+      `}).join('')}
     </div>
   `;
   
@@ -1083,6 +1428,8 @@ async function showServersContent() {
     
     try {
       const results = await window.polar.server.pingAll();
+      savedServers = await window.polar.db.getServers();
+      populateQuickConnect();
       await showServersContent();
     } catch (e) {
       console.error('[PolarOps/Ping] Failed to ping all:', e);
@@ -1120,6 +1467,10 @@ async function showServersContent() {
           dotEl.style.background = result.status === 'online' ? 'var(--green)' : 
                                    result.status === 'timeout' ? 'var(--yellow)' : 'var(--red)';
         }
+        
+        // Update quick connect sidebar status
+        savedServers = await window.polar.db.getServers();
+        populateQuickConnect();
       } catch (e) {
         console.error('[PolarOps/Ping] Failed:', e);
       }
@@ -1212,6 +1563,19 @@ async function showServersContent() {
     btn.addEventListener('mouseleave', () => {
       btn.style.background = 'transparent';
       btn.style.color = 'var(--text-muted)';
+    });
+  });
+  
+  // Add right-click context menu for server cards
+  serversContent.querySelectorAll('.server-card').forEach(card => {
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const serverId = parseInt(card.dataset.serverId);
+      const server = savedServers.find(s => s.id === serverId);
+      if (server) {
+        const activeSession = getActiveSessionForServer(server);
+        showServerContextMenu(e, server, activeSession);
+      }
     });
   });
   
@@ -1636,7 +2000,7 @@ async function showSettingsContent() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
               </button>
               <button class="btn btn-secondary" id="open-instagram" title="Instagram">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.162c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
               </button>
             </div>
           </div>
@@ -2071,7 +2435,8 @@ document.querySelector('.add-server-btn').addEventListener('click', () => {
 });
 
 document.querySelector('.add-server-btn-full').addEventListener('click', () => {
-  document.getElementById('ssh-modal').classList.add('active');
+  switchView('sessions');
+  createSession('local');
 });
 
 document.getElementById('ssh-cancel').addEventListener('click', () => {
@@ -2225,6 +2590,7 @@ document.getElementById('edit-server-form')?.addEventListener('submit', async (e
   
   await window.polar.db.updateServer(serverId, updateData);
   savedServers = await window.polar.db.getServers();
+  populateQuickConnect();
   document.getElementById('edit-server-modal').style.display = 'none';
   await showServersContent();
 });

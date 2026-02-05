@@ -14,8 +14,8 @@ window.polar = {
   
   terminal: {
     create: (sessionId) => ipcRenderer.invoke('terminal:create', sessionId),
-    write: (sessionId, data) => ipcRenderer.invoke('terminal:write', sessionId, data),
-    resize: (sessionId, cols, rows) => ipcRenderer.invoke('terminal:resize', sessionId, cols, rows),
+    write: (sessionId, data) => ipcRenderer.send('terminal:write', sessionId, data),
+    resize: (sessionId, cols, rows) => ipcRenderer.send('terminal:resize', sessionId, cols, rows),
     close: (sessionId) => ipcRenderer.invoke('terminal:close', sessionId),
     onData: (callback) => ipcRenderer.on('terminal:data', (e, sessionId, data) => callback(sessionId, data)),
     onExit: (callback) => ipcRenderer.on('terminal:exit', (e, sessionId) => callback(sessionId))
@@ -23,8 +23,8 @@ window.polar = {
   
   ssh: {
     connect: (sessionId, config) => ipcRenderer.invoke('ssh:connect', sessionId, config),
-    write: (sessionId, data) => ipcRenderer.invoke('ssh:write', sessionId, data),
-    resize: (sessionId, cols, rows) => ipcRenderer.invoke('ssh:resize', sessionId, cols, rows),
+    write: (sessionId, data) => ipcRenderer.send('ssh:write', sessionId, data),
+    resize: (sessionId, cols, rows) => ipcRenderer.send('ssh:resize', sessionId, cols, rows),
     disconnect: (sessionId) => ipcRenderer.invoke('ssh:disconnect', sessionId),
     forward: (sessionId, type, config) => ipcRenderer.invoke('ssh:forward', sessionId, type, config),
     unforward: (forwardId) => ipcRenderer.invoke('ssh:unforward', forwardId)
@@ -63,6 +63,7 @@ window.polar = {
     getServer: (id) => ipcRenderer.invoke('db:getServer', id),
     addServer: (server) => ipcRenderer.invoke('db:addServer', server),
     updateServer: (id, server) => ipcRenderer.invoke('db:updateServer', id, server),
+    updateServerColor: (id, color) => ipcRenderer.invoke('db:updateServerColor', id, color),
     deleteServer: (id) => ipcRenderer.invoke('db:deleteServer', id),
     getSetting: (key) => ipcRenderer.invoke('db:getSetting', key),
     setSetting: (key, value) => ipcRenderer.invoke('db:setSetting', key, value),

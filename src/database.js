@@ -108,6 +108,7 @@ function addServer(server) {
     username: server.username,
     password: server.password || null,
     privateKey: server.privateKey || null,
+    color: server.color || null,
     last_ping_ms: null,
     last_ping_status: 'unknown',
     last_connected_at: null,
@@ -130,8 +131,18 @@ function updateServer(id, server) {
       username: server.username,
       password: server.password || null,
       privateKey: server.privateKey || null,
+      color: server.color !== undefined ? server.color : data.servers[idx].color,
       updated_at: new Date().toISOString()
     };
+    save();
+  }
+}
+
+function updateServerColor(id, color) {
+  const server = data.servers.find(s => s.id === id);
+  if (server) {
+    server.color = color;
+    server.updated_at = new Date().toISOString();
     save();
   }
 }
@@ -261,6 +272,7 @@ module.exports = {
   getServer,
   addServer,
   updateServer,
+  updateServerColor,
   deleteServer,
   updateServerPing,
   updateServerLastConnected,
